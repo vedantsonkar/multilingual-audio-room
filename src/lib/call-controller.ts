@@ -3,6 +3,7 @@ import { roomSchema, type Guest, type Profile, type Room, type TranscriptEntry }
 import type { AudioEngine } from "./audio/engine";
 import { CallPeer } from "./audio/peer";
 import { Interpreter, type TranslationStatus } from "./audio/interpreter";
+import { deviceError, deviceOptions, type AudioDevice } from "./audio/devices";
 
 export interface ActiveCall { room: Room; guest: Guest; tabId: string; stream: MediaStream; engine: AudioEngine; }
 export interface CallSnapshot {
@@ -10,6 +11,8 @@ export interface CallSnapshot {
   translation: TranslationStatus; translationMessage: string;
   speaking: Record<string, boolean>; muted: boolean; volume: number;
   now: number; error: string; audioSuspended: boolean;
+  inputs: AudioDevice[]; outputs: AudioDevice[]; inputId: string; outputId: string;
+  canSelectOutput: boolean; changingDevice: "input" | "output" | null; deviceError: string;
 }
 export class CallController {
   private snapshot: CallSnapshot;
@@ -28,9 +31,15 @@ export class CallController {
   private remote: MediaStream | null = null;
   private remoteMonitor: (() => void) | null = null;
   private originalStop: (() => void) | null = null;
+  private localStream: MediaStream;
+  private localMonitor: (() => void) | null = null;
+  private deviceRefresh = 0;
   constructor(readonly call: ActiveCall, private readonly onEnd: (message: string) => void) {
     this.offset = Date.parse(call.room.serverNow) - Date.now();
-    this.snapshot = { room: call.room, knownMembers: call.room.members, entries: [], connection: "Waiting for your guest", translation: "starting", translationMessage: "Translation starts when someone joins.", speaking: {}, muted: false, volume: 0.85, now: Date.now() + this.offset, error: "", audioSuspended: call.engine.suspended };
+    this.localStream = call.stream;
+    const inputId = call.stream.getAudioTracks()[0]?.getSettings().deviceId ?? "";
+    this.snapshot = { room: call.room, knownMembers: call.room.members, entries: [], connection: "Waiting for your guest", translation: "starting", translationMessage: "Translation starts when someone joins.", speaking: {}, muted: false, volume: 0.85, now: Date.now() + this.offset, error: "", audioSuspended: call.engine.suspended,
+      inputs: [{ id: "", label: "System default" }], outputs: [{ id: "", label: "System default" }], inputId: inputId === "default" ? "" : inputId, outputId: "", canSelectOutput: call.engine.canSelectOutput, changingDevice: null, deviceError: "" };
     call.engine.setVolume(0.85);
   }
   getSnapshot = (): CallSnapshot => this.snapshot;
@@ -46,8 +55,10 @@ export class CallController {
   }
   private start(): void {
     this.started = true;
-    this.call.engine.monitor(this.call.stream, (speaking) => this.speaking(this.call.guest.id, speaking));
-    for (const track of this.call.stream.getAudioTracks()) track.addEventListener("ended", this.microphoneEnded);
+    this.localMonitor = this.call.engine.monitor(this.localStream, (speaking) => this.speaking(this.call.guest.id, speaking));
+    for (const track of this.localStream.getAudioTracks()) track.addEventListener("ended", this.microphoneEnded);
+    navigator.mediaDevices.addEventListener("devicechange", this.devicesChanged);
+    void this.refreshDevices();
     this.applyRoom(this.call.room);
     this.heartbeat = setInterval(() => { void this.sync(); }, 5000);
     this.clock = setInterval(() => {
@@ -68,11 +79,65 @@ export class CallController {
   };
   private onOnline = (): void => { void this.sync(); };
   private microphoneEnded = (): void => {
-    this.stopInterpreter();
-    this.update({ muted: true, error: "Your microphone disconnected. Leave and rejoin after reconnecting it." });
+    this.speaking(this.call.guest.id, false);
+    this.update({ muted: true, deviceError: "Your microphone disconnected. Open audio devices and choose another microphone." });
     void this.saveProfile(this.selfProfile(), true).catch(() => undefined);
   };
   private visibility = (): void => { if (document.visibilityState === "visible") void this.sync(); };
+  private devicesChanged = (): void => { void this.refreshDevices(); };
+  async refreshDevices(): Promise<void> {
+    const version = ++this.deviceRefresh;
+    try {
+      const devices = await navigator.mediaDevices.enumerateDevices();
+      if (this.closed || version !== this.deviceRefresh) return;
+      const inputs = deviceOptions(devices, "audioinput"); const outputs = deviceOptions(devices, "audiooutput");
+      this.update({ inputs, outputs });
+      if (!this.snapshot.changingDevice && this.snapshot.outputId && !outputs.some((device) => device.id === this.snapshot.outputId)) {
+        this.update({ changingDevice: "output" });
+        try { await this.call.engine.setOutput(""); if (!this.closed) this.update({ outputId: "", deviceError: "Your speaker disconnected. Audio is now using the system default." }); }
+        catch { this.update({ deviceError: "Your speaker disconnected. Choose another output device." }); }
+        finally { this.update({ changingDevice: null }); }
+      }
+    } catch { this.update({ deviceError: "Audio devices could not be listed. Check your browser permissions and reopen this menu." }); }
+  }
+  async changeInput(deviceId: string): Promise<void> {
+    if (this.closed || this.snapshot.changingDevice) return;
+    this.update({ changingDevice: "input", deviceError: "" });
+    let stream: MediaStream | null = null; let stopMonitor: (() => void) | null = null; let committed = false;
+    try {
+      stream = await navigator.mediaDevices.getUserMedia({ audio: { ...(deviceId ? { deviceId: { exact: deviceId } } : {}), echoCancellation: true, noiseSuppression: true, autoGainControl: true }, video: false });
+      if (this.closed) return;
+      const track = stream.getAudioTracks()[0];
+      if (!track || track.readyState !== "live") throw new Error("No live microphone track.");
+      track.enabled = false;
+      const replacement = stream;
+      stopMonitor = this.call.engine.monitor(stream, (speaking) => { if (this.localStream === replacement) this.speaking(this.call.guest.id, speaking); });
+      // Membership reconciliation can replace the peer while capture is opening.
+      // Ensure the current sender receives the new track before retiring the old one.
+      let peer: CallPeer | null;
+      do { peer = this.peer; await peer?.replaceMicrophone(track); if (this.closed) return; } while (peer !== this.peer);
+      track.enabled = !this.snapshot.muted;
+      const previous = this.localStream;
+      for (const oldTrack of previous.getAudioTracks()) oldTrack.removeEventListener("ended", this.microphoneEnded);
+      this.localMonitor?.(); this.localStream = stream; this.localMonitor = stopMonitor;
+      track.addEventListener("ended", this.microphoneEnded);
+      committed = true;
+      this.update({ inputId: deviceId, error: "", deviceError: "" });
+      for (const oldTrack of previous.getTracks()) oldTrack.stop();
+    } catch (error: unknown) { this.update({ deviceError: deviceError(error, "input") }); }
+    finally {
+      if (!committed) { stopMonitor?.(); for (const track of stream?.getTracks() ?? []) track.stop(); }
+      this.update({ changingDevice: null });
+      if (!this.closed) void this.refreshDevices();
+    }
+  }
+  async changeOutput(deviceId: string): Promise<void> {
+    if (this.closed || this.snapshot.changingDevice || !this.snapshot.canSelectOutput) return;
+    this.update({ changingDevice: "output", deviceError: "" });
+    try { await this.call.engine.setOutput(deviceId); this.update({ outputId: deviceId }); }
+    catch (error: unknown) { this.update({ deviceError: deviceError(error, "output") }); }
+    finally { this.update({ changingDevice: null }); if (!this.closed) void this.refreshDevices(); }
+  }
   private async sync(): Promise<void> {
     if (this.closed || this.syncPending) return; this.syncPending = true;
     try { const room = await this.action("heartbeat"); this.failures = 0; this.applyRoom(room); }
@@ -92,13 +157,13 @@ export class CallController {
     this.offset = Date.parse(room.serverNow) - Date.now();
     const known = new Map(this.snapshot.knownMembers.map((member) => [member.id, member]));
     for (const member of room.members) known.set(member.id, member);
-    this.update({ room, knownMembers: [...known.values()], error: this.call.stream.getAudioTracks().some((track) => track.readyState === "ended") ? "Your microphone disconnected. Leave and rejoin after reconnecting it." : "", now: Date.now() + this.offset });
+    this.update({ room, knownMembers: [...known.values()], error: "", now: Date.now() + this.offset });
     const peer = room.members.find((member) => member.id !== this.call.guest.id);
     const key = peer ? `${room.epoch}:${peer.id}` : "";
     if (key !== this.peerKey) {
       this.closePeer(); this.peerKey = key;
       if (peer) {
-        const instance = new CallPeer({ code: room.code, epoch: room.epoch, guest: this.call.guest, peerId: peer.id, stream: this.call.stream,
+        const instance = new CallPeer({ code: room.code, epoch: room.epoch, guest: this.call.guest, peerId: peer.id, stream: this.localStream,
           onStream: (stream) => {
             if (this.closed || this.peer !== instance) return;
             this.remoteMonitor?.(); this.remote = stream;
@@ -158,7 +223,7 @@ export class CallController {
   async reconnect(): Promise<void> { this.closePeer(); await this.sync(); }
   async toggleMute(): Promise<void> {
     const muted = !this.snapshot.muted;
-    for (const track of this.call.stream.getAudioTracks()) track.enabled = !muted;
+    for (const track of this.localStream.getAudioTracks()) track.enabled = !muted;
     this.update({ muted });
     try { await this.saveProfile(this.selfProfile(), muted); }
     catch { this.update({ error: "Your microphone changed locally; the room status will update when the connection recovers." }); }
@@ -183,6 +248,8 @@ export class CallController {
     this.closePeer(); this.closed = true;
     if (this.heartbeat) clearInterval(this.heartbeat); if (this.clock) clearInterval(this.clock);
     window.removeEventListener("pagehide", this.pageHide); window.removeEventListener("online", this.onOnline); document.removeEventListener("visibilitychange", this.visibility);
-    for (const track of this.call.stream.getTracks()) { track.removeEventListener("ended", this.microphoneEnded); track.stop(); } this.call.engine.close();
+    navigator.mediaDevices.removeEventListener("devicechange", this.devicesChanged);
+    this.localMonitor?.(); this.localMonitor = null;
+    for (const track of this.localStream.getTracks()) { track.removeEventListener("ended", this.microphoneEnded); track.stop(); } this.call.engine.close();
   }
 }

@@ -30,6 +30,7 @@ export class MockServices {
   tokenRequests = 0;
   audioChunks = 0;
   nonSilentAudioChunks = 0;
+  readonly nonSilentByListener = new Map<string, number>();
   failTranslation = false;
   rejectJoin = false;
   private sockets = new Set<Socket>();
@@ -87,7 +88,7 @@ export class MockServices {
         this.audioChunks++; audio++;
         const pcm = Buffer.from(message.realtimeInput.audio.data, "base64");
         for (let index = 0; index + 1 < pcm.length; index += 2) {
-          if (Math.abs(pcm.readInt16LE(index)) > 100) { this.nonSilentAudioChunks++; break; }
+          if (Math.abs(pcm.readInt16LE(index)) > 100) { this.nonSilentAudioChunks++; this.nonSilentByListener.set(id, (this.nonSilentByListener.get(id) ?? 0) + 1); break; }
         }
         if (audio % 10 !== 0) return;
         const member = this.members.get(id); line++;

@@ -1,4 +1,5 @@
 import { base64ToFloat32 } from "./pcm";
+import { supportsOutputSelection } from "./devices";
 
 export class AudioEngine {
   readonly context: AudioContext;
@@ -12,6 +13,11 @@ export class AudioEngine {
   }
   async activate(): Promise<void> { if (this.context.state === "suspended") await this.context.resume(); }
   get suspended(): boolean { return this.context.state !== "running"; }
+  get canSelectOutput(): boolean { return supportsOutputSelection(this.context); }
+  async setOutput(deviceId: string): Promise<void> {
+    if (!supportsOutputSelection(this.context)) throw new Error("Choose the speaker through your device’s sound settings in this browser.");
+    await this.context.setSinkId(deviceId);
+  }
   setVolume(volume: number): void { this.volume.gain.value = Math.max(0, Math.min(volume, 1)); }
   play(encoded: string): void {
     if (this.context.state !== "running") return;
@@ -42,7 +48,12 @@ export class AudioEngine {
   }
   monitor(stream: MediaStream, onSpeaking: (speaking: boolean) => void): () => void {
     const source = this.context.createMediaStreamSource(stream); const analyser = this.context.createAnalyser();
-    analyser.fftSize = 512; source.connect(analyser); const samples = new Float32Array(analyser.fftSize);
+    analyser.fftSize = 512;
+    // Pull the analyser through an inaudible destination path so input-only
+    // meters continue updating even before a peer/interpreter is connected.
+    const silence = this.context.createGain(); silence.gain.value = 0;
+    source.connect(analyser); analyser.connect(silence); silence.connect(this.context.destination);
+    const samples = new Float32Array(analyser.fftSize);
     let lastSpeech = 0; let previous = false;
     const timer = window.setInterval(() => {
       analyser.getFloatTimeDomainData(samples);
@@ -51,7 +62,7 @@ export class AudioEngine {
       const speaking = performance.now() - lastSpeech < 300;
       if (speaking !== previous) { previous = speaking; onSpeaking(speaking); }
     }, 100);
-    const stop = () => { window.clearInterval(timer); source.disconnect(); analyser.disconnect(); onSpeaking(false); this.cleanups.delete(stop); };
+    const stop = () => { window.clearInterval(timer); source.disconnect(); analyser.disconnect(); silence.disconnect(); onSpeaking(false); this.cleanups.delete(stop); };
     this.cleanups.add(stop); return stop;
   }
   close(): void {

@@ -65,6 +65,12 @@ export class CallPeer {
   sendCaption(id: string, text: string, final: boolean): void {
     if (this.data?.readyState === "open" && this.data.bufferedAmount < 64_000) this.data.send(JSON.stringify({ type: "caption", id, text: text.slice(0, 12_000), final }));
   }
+  async replaceMicrophone(track: MediaStreamTrack): Promise<void> {
+    if (this.closed) return;
+    const sender = this.pc.getSenders().find((sender) => sender.track?.kind === "audio");
+    if (!sender) throw new Error("The outgoing microphone track is unavailable.");
+    await sender.replaceTrack(track);
+  }
   async start(): Promise<void> {
     this.options.onConnection("Connecting call…");
     await this.client.realtime.setAuth(this.options.guest.accessToken);

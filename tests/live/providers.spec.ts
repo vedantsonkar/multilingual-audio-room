@@ -21,11 +21,12 @@ test("deployed guests connect through private signaling and real Gemini sessions
   const first = await browser.newContext(); const second = await browser.newContext();
   const a = await first.newPage(); const b = await second.newPage();
   const errors: string[] = [];
-  const metrics = { audioChunks: 0, nonSilentChunks: 0, inputTranscripts: 0, outputTranscripts: 0, translatedAudioChunks: 0 };
+  const metrics = { sessions: 0, audioChunks: 0, nonSilentChunks: 0, inputTranscripts: 0, outputTranscripts: 0, translatedAudioChunks: 0 };
   const outbound = z.object({ realtimeInput: z.object({ audio: z.object({ data: z.string() }) }) });
   const inbound = z.object({ serverContent: z.object({ inputTranscription: z.unknown().optional(), outputTranscription: z.unknown().optional(), modelTurn: z.object({ parts: z.array(z.object({ inlineData: z.unknown().optional() })) }).optional() }) });
   for (const page of [a, b]) page.on("websocket", (socket) => {
     if (!socket.url().startsWith("wss://generativelanguage.googleapis.com/")) return;
+    metrics.sessions++;
     socket.on("framesent", ({ payload }) => {
       let json: unknown; try { json = JSON.parse(String(payload)); } catch { return; }
       const parsed = outbound.safeParse(json); if (!parsed.success) return;
@@ -82,6 +83,15 @@ test("deployed guests connect through private signaling and real Gemini sessions
       expect(metrics.nonSilentChunks).toBeGreaterThan(0);
       expect(metrics.translatedAudioChunks).toBeGreaterThan(0);
     }
+    await a.getByRole("button", { name: "Audio devices", exact: true }).click();
+    await a.getByRole("combobox", { name: "Microphone", exact: true }).click();
+    await a.getByRole("option").filter({ hasText: /Fake Audio Input 2/ }).click();
+    await expect(a.getByRole("combobox", { name: "Microphone", exact: true })).toContainText("Fake Audio Input 2");
+    await a.screenshot({ path: testInfo.outputPath("live-audio-devices.png"), fullPage: true });
+    await a.keyboard.press("Escape");
+    await expect(a.getByText("Connected", { exact: true })).toBeVisible();
+    await expect(a.getByText("Live translation", { exact: true })).toBeVisible();
+    expect(metrics.sessions).toBe(2);
     await a.getByRole("button", { name: "Mute microphone", exact: true }).click();
     await expect(a.getByRole("button", { name: "Unmute microphone", exact: true })).toBeVisible();
     await a.screenshot({ path: testInfo.outputPath("live-hindi-conversation.png"), fullPage: true });
