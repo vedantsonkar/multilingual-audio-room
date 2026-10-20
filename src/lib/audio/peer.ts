@@ -1,4 +1,4 @@
-import { createClient, type RealtimeChannel } from "@supabase/supabase-js";
+import { createClient, REALTIME_SUBSCRIBE_STATES, type RealtimeChannel } from "@supabase/supabase-js";
 import { captionSchema, signalSchema, type Guest, type Signal } from "../contracts";
 import type { Database } from "../database.types";
 
@@ -28,7 +28,7 @@ export class CallPeer {
     this.pc.ontrack = (event) => {
       const stream = event.streams[0] ?? new MediaStream([event.track]); this.options.onStream(stream);
     };
-    this.pc.onicecandidate = (event) => { if (event.candidate) void this.send({ type: "ice", from: options.guest.id, epoch: options.epoch, candidate: event.candidate.toJSON() }).catch(() => this.error("Signaling connection interrupted.")); };
+    this.pc.onicecandidate = (event) => { if (event.candidate) { const ice = event.candidate; void this.send({ type: "ice", from: options.guest.id, epoch: options.epoch, candidate: { candidate: ice.candidate, sdpMid: ice.sdpMid, sdpMLineIndex: ice.sdpMLineIndex, usernameFragment: ice.usernameFragment } }).catch(() => this.error("Signaling connection interrupted.")); } };
     this.pc.onconnectionstatechange = () => {
       if (this.closed) return;
       if (this.pc.connectionState === "connected") {
@@ -64,10 +64,10 @@ export class CallPeer {
       this.chain = this.chain.then(() => this.receive(parsed.data)).catch(() => this.error("Call negotiation failed. Please reconnect."));
     }).subscribe((status) => {
       if (this.closed) return;
-      if (status === "SUBSCRIBED") {
+      if (status === REALTIME_SUBSCRIBE_STATES.SUBSCRIBED) {
         void this.ready();
         this.readyTimer = setInterval(() => { if (!this.connected) void this.ready(); }, 2000);
-      } else if (status === "CHANNEL_ERROR" || status === "TIMED_OUT") this.error("Room signaling is unavailable. Please reconnect.");
+      } else if (status === REALTIME_SUBSCRIBE_STATES.CHANNEL_ERROR || status === REALTIME_SUBSCRIBE_STATES.TIMED_OUT) this.error("Room signaling is unavailable. Please reconnect.");
     });
     this.timeout = setTimeout(() => { if (!this.connected) this.error("No direct connection after 25 seconds. This network may block peer-to-peer calls. Try another network."); }, 25_000);
   }
@@ -108,6 +108,6 @@ export class CallPeer {
     this.closed = true; if (this.timeout) clearTimeout(this.timeout); if (this.readyTimer) clearInterval(this.readyTimer);
     this.data?.close(); this.pc.close();
     if (this.channel) void this.client.removeChannel(this.channel);
-    this.client.realtime.disconnect();
+    void this.client.realtime.disconnect();
   }
 }

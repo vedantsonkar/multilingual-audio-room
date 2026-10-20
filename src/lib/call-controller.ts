@@ -1,12 +1,12 @@
 import { api, ApiError } from "./client-api";
 import { roomSchema, type Guest, type Profile, type Room, type TranscriptEntry } from "./contracts";
-import { AudioEngine } from "./audio/engine";
+import type { AudioEngine } from "./audio/engine";
 import { CallPeer } from "./audio/peer";
 import { Interpreter, type TranslationStatus } from "./audio/interpreter";
 
 export interface ActiveCall { room: Room; guest: Guest; tabId: string; stream: MediaStream; engine: AudioEngine; }
 export interface CallSnapshot {
-  room: Room; entries: TranscriptEntry[]; connection: string;
+  room: Room; knownMembers: Room["members"]; entries: TranscriptEntry[]; connection: string;
   translation: TranslationStatus; translationMessage: string;
   speaking: Record<string, boolean>; muted: boolean; volume: number;
   now: number; error: string; audioSuspended: boolean;
@@ -30,7 +30,7 @@ export class CallController {
   private originalStop: (() => void) | null = null;
   constructor(readonly call: ActiveCall, private readonly onEnd: (message: string) => void) {
     this.offset = Date.parse(call.room.serverNow) - Date.now();
-    this.snapshot = { room: call.room, entries: [], connection: "Waiting for your guest", translation: "starting", translationMessage: "Translation starts when someone joins.", speaking: {}, muted: false, volume: 0.85, now: Date.now() + this.offset, error: "", audioSuspended: call.engine.suspended };
+    this.snapshot = { room: call.room, knownMembers: call.room.members, entries: [], connection: "Waiting for your guest", translation: "starting", translationMessage: "Translation starts when someone joins.", speaking: {}, muted: false, volume: 0.85, now: Date.now() + this.offset, error: "", audioSuspended: call.engine.suspended };
     call.engine.setVolume(0.85);
   }
   getSnapshot = (): CallSnapshot => this.snapshot;
@@ -47,6 +47,7 @@ export class CallController {
   private start(): void {
     this.started = true;
     this.call.engine.monitor(this.call.stream, (speaking) => this.speaking(this.call.guest.id, speaking));
+    for (const track of this.call.stream.getAudioTracks()) track.addEventListener("ended", this.microphoneEnded);
     this.applyRoom(this.call.room);
     this.heartbeat = setInterval(() => { void this.sync(); }, 5000);
     this.clock = setInterval(() => {
@@ -66,6 +67,10 @@ export class CallController {
     this.dispose();
   };
   private onOnline = (): void => { void this.sync(); };
+  private microphoneEnded = (): void => {
+    this.stopInterpreter();
+    this.update({ muted: true, error: "Your microphone disconnected. Leave and rejoin after reconnecting it." });
+  };
   private visibility = (): void => { if (document.visibilityState === "visible") void this.sync(); };
   private async sync(): Promise<void> {
     if (this.closed || this.syncPending) return; this.syncPending = true;
@@ -84,7 +89,9 @@ export class CallController {
     const self = room.members.find((member) => member.id === this.call.guest.id);
     if (!self) { this.dispose(); this.onEnd("Your seat is no longer active. Join again to continue."); return; }
     this.offset = Date.parse(room.serverNow) - Date.now();
-    this.update({ room, error: "", now: Date.now() + this.offset });
+    const known = new Map(this.snapshot.knownMembers.map((member) => [member.id, member]));
+    for (const member of room.members) known.set(member.id, member);
+    this.update({ room, knownMembers: [...known.values()], error: "", now: Date.now() + this.offset });
     const peer = room.members.find((member) => member.id !== this.call.guest.id);
     const key = peer ? `${room.epoch}:${peer.id}` : "";
     if (key !== this.peerKey) {
@@ -174,6 +181,6 @@ export class CallController {
     this.closePeer(); this.closed = true;
     if (this.heartbeat) clearInterval(this.heartbeat); if (this.clock) clearInterval(this.clock);
     window.removeEventListener("pagehide", this.pageHide); window.removeEventListener("online", this.onOnline); document.removeEventListener("visibilitychange", this.visibility);
-    for (const track of this.call.stream.getTracks()) track.stop(); this.call.engine.close();
+    for (const track of this.call.stream.getTracks()) { track.removeEventListener("ended", this.microphoneEnded); track.stop(); } this.call.engine.close();
   }
 }

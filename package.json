@@ -11,7 +11,10 @@
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
     "test:e2e": "playwright test",
-    "db:types": "tsx scripts/generate-db-types.ts"
+    "db:types": "tsx scripts/generate-db-types.ts",
+    "predev": "tsx scripts/build-worklet.ts",
+    "prebuild": "tsx scripts/build-worklet.ts",
+    "check:gemini": "tsx scripts/check-gemini.ts"
   },
   "dependencies": {
     "@google/genai": "2.30.0",

@@ -22,5 +22,5 @@ export default defineConfig([
     }
   },
   { files: ["**/*.mjs"], ...tseslint.configs.disableTypeChecked },
-  globalIgnores([".next/**", ".next-production/**", "playwright-report/**", "test-results/**", "next-env.d.ts"]),
+  globalIgnores([".next*/**", "public/audio/capture-worklet.js", "playwright-report/**", "test-results/**", "next-env.d.ts"]),
 ]);

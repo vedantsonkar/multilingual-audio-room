@@ -29,7 +29,7 @@ export function pcmToBase64(samples: Int16Array): string {
   let binary = ""; for (const byte of bytes) binary += String.fromCharCode(byte);
   return btoa(binary);
 }
-export function base64ToFloat32(encoded: string): Float32Array {
+export function base64ToFloat32(encoded: string): Float32Array<ArrayBuffer> {
   const binary = atob(encoded); const bytes = Uint8Array.from(binary, (char) => char.charCodeAt(0));
   const view = new DataView(bytes.buffer); const output = new Float32Array(Math.floor(bytes.length / 2));
   for (let i = 0; i < output.length; i++) output[i] = view.getInt16(i * 2, true) / 32768;
