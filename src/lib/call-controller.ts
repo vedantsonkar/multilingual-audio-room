@@ -70,6 +70,7 @@ export class CallController {
   private microphoneEnded = (): void => {
     this.stopInterpreter();
     this.update({ muted: true, error: "Your microphone disconnected. Leave and rejoin after reconnecting it." });
+    void this.saveProfile(this.selfProfile(), true).catch(() => undefined);
   };
   private visibility = (): void => { if (document.visibilityState === "visible") void this.sync(); };
   private async sync(): Promise<void> {
@@ -91,7 +92,7 @@ export class CallController {
     this.offset = Date.parse(room.serverNow) - Date.now();
     const known = new Map(this.snapshot.knownMembers.map((member) => [member.id, member]));
     for (const member of room.members) known.set(member.id, member);
-    this.update({ room, knownMembers: [...known.values()], error: "", now: Date.now() + this.offset });
+    this.update({ room, knownMembers: [...known.values()], error: this.call.stream.getAudioTracks().some((track) => track.readyState === "ended") ? "Your microphone disconnected. Leave and rejoin after reconnecting it." : "", now: Date.now() + this.offset });
     const peer = room.members.find((member) => member.id !== this.call.guest.id);
     const key = peer ? `${room.epoch}:${peer.id}` : "";
     if (key !== this.peerKey) {
@@ -107,6 +108,7 @@ export class CallController {
           onConnection: (connection) => {
             this.update({ connection });
             if (connection !== "Connected" && !connection.startsWith("Connecting")) this.stopInterpreter();
+            if (connection === "Connected" && this.remote && !this.interpreter && !this.originalStop) this.startInterpreter();
           },
           onCaption: (caption) => this.upsertEntry(`self:${caption.id}`, this.call.guest.id, caption.text, ""),
         });

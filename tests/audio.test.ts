@@ -15,6 +15,10 @@ describe("audio processing", () => {
     const decoded = base64ToFloat32(pcmToBase64(new Int16Array([-32768, 0, 16384, 32767])));
     expect([...decoded]).toEqual([-1, 0, 0.5, 32767 / 32768]);
   });
+  it("rejects invalid sample rates and incomplete PCM frames", () => {
+    for (const rate of [0, -1, Infinity, NaN]) expect(() => new PcmResampler(rate)).toThrow();
+    expect(() => base64ToFloat32(btoa("x"))).toThrow(/incomplete/);
+  });
 });
 describe("contracts and transcript emphasis", () => {
   it("keeps the latest entry per speaker independently", () => {

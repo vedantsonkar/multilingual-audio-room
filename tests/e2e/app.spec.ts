@@ -67,3 +67,13 @@ test("solo warning, Wait reset and provider admission errors", async ({ page }) 
   await page.getByRole("textbox", { name: "Room code", exact: true }).fill("TEST1234"); await page.getByRole("button", { name: "Join", exact: true }).click(); await page.getByRole("button", { name: "Join room", exact: true }).click();
   await expect(page.getByRole("alert")).toContainText("room is full");
 });
+
+test("call controls stay reachable on small phones, landscape and large displays", async ({ page }) => {
+  const services = new MockServices(); await services.attach(page, first); await enterCall(page, "A very long guest name with many words");
+  for (const viewport of [{ width: 320, height: 568 }, { width: 844, height: 390 }, { width: 2048, height: 1152 }]) {
+    await page.setViewportSize(viewport);
+    await expect(page.getByRole("button", { name: "Leave call", exact: true })).toBeInViewport();
+    expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
+  }
+  await page.getByRole("button", { name: "Leave call", exact: true }).click();
+});

@@ -1,7 +1,9 @@
 export class PcmResampler {
   private pending = new Float32Array(0);
   private cursor = 0;
-  constructor(private readonly sourceRate: number, private readonly targetRate = 16000) {}
+  constructor(private readonly sourceRate: number, private readonly targetRate = 16000) {
+    if (!Number.isFinite(sourceRate) || !Number.isFinite(targetRate) || sourceRate <= 0 || targetRate <= 0) throw new Error("Audio sample rates must be positive finite numbers.");
+  }
   push(input: Float32Array): Int16Array {
     const combined = new Float32Array(this.pending.length + input.length);
     combined.set(this.pending); combined.set(input, this.pending.length);
@@ -31,6 +33,7 @@ export function pcmToBase64(samples: Int16Array): string {
 }
 export function base64ToFloat32(encoded: string): Float32Array<ArrayBuffer> {
   const binary = atob(encoded); const bytes = Uint8Array.from(binary, (char) => char.charCodeAt(0));
+  if (bytes.length % 2 !== 0) throw new Error("Received an incomplete PCM audio sample.");
   const view = new DataView(bytes.buffer); const output = new Float32Array(Math.floor(bytes.length / 2));
   for (let i = 0; i < output.length; i++) output[i] = view.getInt16(i * 2, true) / 32768;
   return output;

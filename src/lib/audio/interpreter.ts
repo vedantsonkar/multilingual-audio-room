@@ -7,7 +7,7 @@ import type { AudioEngine } from "./engine";
 export type TranslationStatus = "starting" | "live" | "retrying" | "error" | "original";
 export interface CaptionUpdate { id: string; original: string; translated: string; final: boolean; }
 interface Options {
-  code: string; tabId: string; stream: MediaStream; engine: AudioEngine;
+  code: string; tabId: string; stream: MediaStream; engine: Pick<AudioEngine, "capture" | "clear" | "play">;
   onStatus: (status: TranslationStatus, message: string) => void;
   onCaption: (caption: CaptionUpdate) => void;
 }
@@ -51,12 +51,13 @@ export class Interpreter {
       });
       if (this.disposed || version !== this.version) { session.close(); return; }
       this.session = session;
-      this.stopCapture = await this.options.engine.capture(this.options.stream, (samples) => {
+      const stopCapture = await this.options.engine.capture(this.options.stream, (samples) => {
         if (!this.ready || this.disposed || version !== this.version) return;
         try { session.sendRealtimeInput({ audio: { data: pcmToBase64(samples), mimeType: "audio/pcm;rate=16000" } }); }
         catch { this.failed(version, "Could not stream audio to translation."); }
       });
-      if (this.disposed || version !== this.version) { this.stopCapture(); this.stopCapture = null; return; }
+      if (this.disposed || version !== this.version) { stopCapture(); return; }
+      this.stopCapture = stopCapture;
       if (!this.ready) this.setupTimer = setTimeout(() => this.failed(version, "Translation took too long to start."), 15_000);
       const rotateIn = Math.max(1000, Math.min(9 * 60_000, Date.parse(auth.expiresAt) - Date.now() - 10_000));
       this.timer = setTimeout(() => { this.retries = 0; void this.start(); }, rotateIn);

@@ -5,6 +5,7 @@ export default defineConfig({
   projects: [
     { name: "desktop", use: { ...devices["Desktop Chrome"], channel: "chromium", launchOptions: { args: ["--use-fake-ui-for-media-stream", "--use-fake-device-for-media-stream", "--autoplay-policy=no-user-gesture-required"] } } },
     { name: "mobile", use: { ...devices["Pixel 7"], channel: "chromium", launchOptions: { args: ["--use-fake-ui-for-media-stream", "--use-fake-device-for-media-stream", "--autoplay-policy=no-user-gesture-required"] } } },
+    { name: "iphone-webkit", testMatch: "layout.spec.ts", use: { ...devices["iPhone 13"], browserName: "webkit" } },
   ],
   webServer: {
     command: "npm run dev -- --port 3002", url: "http://localhost:3002", timeout: 120_000, reuseExistingServer: !process.env.CI,
