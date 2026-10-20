@@ -29,6 +29,7 @@ export class MockServices {
   endsAt: string | null = null;
   tokenRequests = 0;
   audioChunks = 0;
+  nonSilentAudioChunks = 0;
   failTranslation = false;
   rejectJoin = false;
   private sockets = new Set<Socket>();
@@ -80,10 +81,14 @@ export class MockServices {
       let audio = 0; let line = 0;
       ws.onMessage((raw) => {
         const data: unknown = JSON.parse(String(raw));
-        const message = z.object({ setup: z.unknown().optional(), realtimeInput: z.object({ audio: z.unknown().optional() }).optional() }).parse(data);
+        const message = z.object({ setup: z.unknown().optional(), realtimeInput: z.object({ audio: z.object({ data: z.string() }).optional() }).optional() }).parse(data);
         if (message.setup) { ws.send(JSON.stringify({ setupComplete: { sessionId: "test" } })); return; }
         if (!message.realtimeInput?.audio) return;
         this.audioChunks++; audio++;
+        const pcm = Buffer.from(message.realtimeInput.audio.data, "base64");
+        for (let index = 0; index + 1 < pcm.length; index += 2) {
+          if (Math.abs(pcm.readInt16LE(index)) > 100) { this.nonSilentAudioChunks++; break; }
+        }
         if (audio % 10 !== 0) return;
         const member = this.members.get(id); line++;
         const translated = member?.listeningLanguage === "hi" ? `आपसे बात करके अच्छा लगा। ${line}` : `It’s lovely to talk to you. ${line}`;

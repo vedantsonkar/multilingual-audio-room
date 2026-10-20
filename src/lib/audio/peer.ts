@@ -13,6 +13,7 @@ export class CallPeer {
   private readonly client;
   private channel: RealtimeChannel | null = null;
   private data: RTCDataChannel | null = null;
+  private remoteElement: HTMLAudioElement | null = null;
   private closed = false;
   private connected = false;
   private offering = false;
@@ -26,7 +27,18 @@ export class CallPeer {
     });
     for (const track of options.stream.getAudioTracks()) this.pc.addTrack(track, options.stream);
     this.pc.ontrack = (event) => {
-      const stream = event.streams[0] ?? new MediaStream([event.track]); this.options.onStream(stream);
+      const stream = event.streams[0] ?? new MediaStream([event.track]);
+      this.releaseRemoteElement();
+      // Chromium can deliver silent Web Audio samples until the remote stream
+      // is attached to a playing media element (Chromium issue 40094084).
+      // Keep that element inaudible; only the interpreter or explicit original
+      // listening path may reach the listener's speakers.
+      const element = document.createElement("audio");
+      element.muted = true; element.autoplay = true;
+      element.setAttribute("playsinline", ""); element.srcObject = stream;
+      this.remoteElement = element;
+      void element.play().catch(() => { if (!this.closed && this.remoteElement === element) this.error("Remote audio could not start. Please reconnect the call."); });
+      this.options.onStream(stream);
     };
     this.pc.onicecandidate = (event) => { if (event.candidate) { const ice = event.candidate; void this.send({ type: "ice", from: options.guest.id, epoch: options.epoch, candidate: { candidate: ice.candidate, sdpMid: ice.sdpMid, sdpMLineIndex: ice.sdpMLineIndex, usernameFragment: ice.usernameFragment } }).catch(() => this.error("Signaling connection interrupted.")); } };
     this.pc.onconnectionstatechange = () => {
@@ -104,9 +116,13 @@ export class CallPeer {
     }
   }
   private error(message: string): void { if (!this.closed) this.options.onConnection(message); }
+  private releaseRemoteElement(): void {
+    if (!this.remoteElement) return;
+    this.remoteElement.pause(); this.remoteElement.srcObject = null; this.remoteElement = null;
+  }
   close(): void {
     this.closed = true; if (this.timeout) clearTimeout(this.timeout); if (this.readyTimer) clearInterval(this.readyTimer);
-    this.data?.close(); this.pc.close();
+    this.releaseRemoteElement(); this.data?.close(); this.pc.close();
     if (this.channel) void this.client.removeChannel(this.channel);
     void this.client.realtime.disconnect();
   }

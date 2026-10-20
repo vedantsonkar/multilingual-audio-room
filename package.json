@@ -11,11 +11,13 @@
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
     "test:e2e": "playwright test",
+    "test:live": "playwright test --config playwright.live.config.ts",
     "db:types": "tsx scripts/generate-db-types.ts",
     "predev": "tsx scripts/build-worklet.ts",
     "prebuild": "tsx scripts/build-worklet.ts",
     "check:gemini": "tsx scripts/check-gemini.ts",
-    "check:supabase": "tsx scripts/check-supabase.ts"
+    "check:supabase": "tsx scripts/check-supabase.ts",
+    "check:browser-secrets": "tsx scripts/check-browser-secrets.ts"
   },
   "dependencies": {
     "@google/genai": "2.30.0",

@@ -47,7 +47,7 @@ test("two real browser peers exchange audio, named captions and independent text
     const lines = opacity.filter((line) => line.speaker === id); expect(lines.at(-1)?.opacity).toBe("1"); expect(lines[0]?.opacity).toBe("0.7");
   }
   await page.screenshot({ path: testInfo.outputPath("conversation.png"), fullPage: true });
-  expect(services.audioChunks).toBeGreaterThan(0); expect(services.tokenRequests).toBe(2); expect(errors).toEqual([]);
+  expect(services.audioChunks).toBeGreaterThan(0); expect(services.nonSilentAudioChunks).toBeGreaterThan(0); expect(services.tokenRequests).toBe(2); expect(errors).toEqual([]);
   services.failTranslation = true;
   await page.getByRole("button", { name: "Call preferences" }).click();
   await page.getByRole("combobox", { name: "I want to listen in" }).click(); await page.getByPlaceholder("Search languages…").fill("Hindi"); await page.getByRole("option", { name: /Hindi/ }).click(); await page.getByRole("button", { name: "Save preferences" }).click();

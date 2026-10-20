@@ -77,6 +77,8 @@ npm run test:e2e
 npm run build
 npm run db:types
 npm run check:gemini
+npm run check:supabase
+npm run check:browser-secrets
 ```
 
 `db:types` applies the migrations to an isolated PostgreSQL-compatible PGlite instance and regenerates `src/lib/database.types.ts`; it never touches your live database. The database tests also run without Supabase credentials and exercise RLS, privileged RPC access, admission, leases, solo waiting, expiry, and request limits.
@@ -84,5 +86,11 @@ npm run check:gemini
 Browser tests use real browser microphone fixtures, AudioWorklets, RTCPeerConnection, data channels, and playback. Only the Supabase/Gemini providers are simulated. They use port 3002 and `.next-e2e`, leaving a running development server intact. These tests do not establish live provider translation accuracy or physical iPhone/Android compatibility.
 
 `check:gemini` uses the locally configured key to issue an ephemeral token and confirm Live Translate WebSocket setup, without sending speech or printing credentials. A complete live call also requires the Supabase migration and settings above. Test iPhone Safari and Android Chrome on real devices with the page visible before relying on mobile calls; background/locked-phone continuity is outside this release.
+
+`check:supabase` verifies Auth reachability, anonymous sign-in configuration, and room table/RPC availability through the SDK. `check:browser-secrets` scans production browser chunks for the locally configured server secret values; build first, and set `NEXT_BUILD_DIR` if the build uses another output directory.
+
+`npm run test:live` is a separate, opt-in check against the deployed app and real providers. It creates two isolated guest sessions, connects a direct WebRTC call through private signaling, opens constrained Gemini sessions, checks mute, and leaves both seats. It uses local `DEMO_ACCESS_CODE` without logging it; traces are disabled because they can contain temporary credentials. Set `LIVE_BASE_URL` to check another deployment. Set `LIVE_AUDIO_FIXTURE` to an absolute path to a synthetic, 16-bit mono PCM WAV speech clip to additionally verify named transcripts in both directions and Hindi output. This sends the fixture to Gemini and consumes live API quota. Generated speech, screenshots, and other local artifacts belong in ignored `artifacts/`.
+
+Remote streams are attached to an inaudible playing audio element before Web Audio capture, addressing Chromium issue 40094084. Original audio still reaches the listener only after they explicitly select **Listen to original**. Browser regression tests assert non-silent PCM reaches the interpreter so connection-only success cannot hide an empty audio stream.
 
 Strict TypeScript and type-aware ESLint apply to application code, copied components, worklet sources, scripts, and tests. External JSON is validated before use. The worklet JavaScript in `public/audio` is generated from typed source by `predev`/`prebuild`.

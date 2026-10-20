@@ -11,6 +11,7 @@ test-results/
 .vercel/
 .db-types/
 .certs/
+artifacts/
 
 .vercel
 .env*
