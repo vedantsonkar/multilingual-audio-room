@@ -73,6 +73,14 @@ test("deployed guests connect through private signaling and real Gemini sessions
       }
       await expect(a.getByTestId("transcript-entry").filter({ hasText: /[\u0900-\u097F]/ }).first()).toBeVisible({ timeout: 30_000 });
       await expect.poll(async () => a.getByTestId("transcript-entry").count(), { timeout: 35_000 }).toBeGreaterThanOrEqual(4);
+      const lines = await a.getByTestId("transcript-entry").evaluateAll((nodes) => nodes.map((node) => ({ speaker: node.getAttribute("data-speaker"), opacity: getComputedStyle(node).opacity })));
+      for (const speaker of new Set(lines.map((line) => line.speaker))) {
+        const spoken = lines.filter((line) => line.speaker === speaker);
+        expect(spoken.at(-1)?.opacity).toBe("1");
+        if (spoken.length > 1) expect(spoken[0]?.opacity).toBe("0.7");
+      }
+      expect(metrics.nonSilentChunks).toBeGreaterThan(0);
+      expect(metrics.translatedAudioChunks).toBeGreaterThan(0);
     }
     await a.getByRole("button", { name: "Mute microphone", exact: true }).click();
     await expect(a.getByRole("button", { name: "Unmute microphone", exact: true })).toBeVisible();

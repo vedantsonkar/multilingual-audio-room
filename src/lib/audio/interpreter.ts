@@ -20,6 +20,7 @@ export class Interpreter {
   private stopCapture: (() => void) | null = null;
   private timer: ReturnType<typeof setTimeout> | null = null;
   private setupTimer: ReturnType<typeof setTimeout> | null = null;
+  private captionTimer: ReturnType<typeof setTimeout> | null = null;
   private ready = false;
   private caption: CaptionUpdate = this.newCaption();
   constructor(private readonly options: Options) {}
@@ -27,7 +28,10 @@ export class Interpreter {
   private emit(final = false): void {
     if (!this.caption.original && !this.caption.translated) return;
     this.options.onCaption({ ...this.caption, final });
-    if (final) this.caption = this.newCaption();
+    if (final) {
+      if (this.captionTimer) clearTimeout(this.captionTimer);
+      this.captionTimer = null; this.caption = this.newCaption();
+    }
   }
   async start(): Promise<void> {
     if (this.disposed) return;
@@ -75,7 +79,17 @@ export class Interpreter {
     if (content?.interrupted) this.options.engine.clear();
     if (content?.inputTranscription?.text) this.caption.original += content.inputTranscription.text;
     if (content?.outputTranscription?.text) this.caption.translated += content.outputTranscription.text;
-    if (content?.inputTranscription || content?.outputTranscription) this.emit();
+    if (content?.inputTranscription || content?.outputTranscription) {
+      this.emit();
+      if (this.captionTimer) clearTimeout(this.captionTimer);
+      // Live Translate is a continuous pipeline and may never send turnComplete.
+      // Keep source/translation together, finalizing their shared paragraph once
+      // both reach punctuation, or after a quiet gap in transcription updates.
+      const ended = (text: string): boolean => /[.!?。！？।॥؟۔።][\s\p{Pe}\p{Pf}"'»]*$/u.test(text.trim());
+      const paired = Boolean(this.caption.original.trim() && this.caption.translated.trim());
+      if (paired && (ended(this.caption.original) && ended(this.caption.translated))) this.emit(true);
+      else if (paired) this.captionTimer = setTimeout(() => this.emit(true), 1800);
+    }
     for (const part of content?.modelTurn?.parts ?? []) {
       if (part.inlineData?.data) this.options.engine.play(part.inlineData.data);
     }
@@ -95,7 +109,8 @@ export class Interpreter {
     this.ready = false;
     if (this.timer) clearTimeout(this.timer);
     if (this.setupTimer) clearTimeout(this.setupTimer);
-    this.timer = null; this.setupTimer = null;
+    if (this.captionTimer) clearTimeout(this.captionTimer);
+    this.timer = null; this.setupTimer = null; this.captionTimer = null;
     this.stopCapture?.(); this.stopCapture = null;
     const session = this.session; this.session = null;
     if (session) { try { session.sendRealtimeInput({ audioStreamEnd: true }); } catch { /* Connection already closed. */ } session.close(); }

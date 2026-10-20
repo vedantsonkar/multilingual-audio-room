@@ -62,6 +62,7 @@ The app hosts no WebSocket server on Vercel. Browsers connect to Supabase Realti
 - The 30-minute call deadline starts when the second person first joins. Rejoining never resets it. A warning appears with two minutes remaining.
 - Normal audio always goes through Gemini, including same-language speech, so users can switch spoken languages naturally. On translation failure, audio pauses until recovery or the listener explicitly chooses original audio.
 - The transcript shows peer translations and self originals, with source text expandable. Each speaker's newest entry has full opacity; their previous entries use 70%. Scrolling back pauses autoscroll until **Jump to live** is selected.
+- Continuous Gemini translation is grouped into paired source/translation paragraphs at shared sentence punctuation or a quiet gap in transcript updates; it does not depend on conversational turn-completion events.
 - Transcript history is memory-only and bounded to the latest 1,000 entries. It is lost on refresh/leave and is never stored in Supabase or localStorage. Name/language preferences alone are remembered locally.
 
 **STUN only:** Cloudflare STUN is free. There is no TURN service, fallback relay, or TURN credential configuration. Some restrictive networks cannot establish a direct call. Gemini and hosting have independent pricing and quotas. Audio is processed by Google for translation; do not describe these calls as end-to-end private from the translation provider.
